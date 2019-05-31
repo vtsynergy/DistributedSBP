@@ -398,23 +398,62 @@ def compute_delta_entropy(r, s, partition: Partition, edge_count_updates: EdgeCo
         where the sum runs over all entries $(t_1, t_2)$ in rows and cols $r$ and $s$ of the edge count matrix
     """
     if use_sparse: # computation in the sparse matrix is slow so convert to numpy arrays since operations are on only two rows and cols
-        M_r_row = edge_count_updates.block_row.toarray()
-        M_s_row = edge_count_updates.proposal_row.toarray()
-        M_r_col = edge_count_updates.block_col.toarray()
-        M_s_col = edge_count_updates.proposal_col.toarray()
-        M_r_t1 = partition.interblock_edge_count[r, :].toarray()
-        M_s_t1 = partition.interblock_edge_count[s, :].toarray()
-        M_t2_r = partition.interblock_edge_count[:, r].toarray()
-        M_t2_s = partition.interblock_edge_count[:, s].toarray()
+        # return compute_delta_entropy_sparse(r, s, partition, edge_count_updates, d_out_new, d_in_new)
+        # compute_delta_entropy_sparse(r, s, partition, edge_count_updates, d_out_new, d_in_new)
+        return compute_delta_entropy_sparse2(r, s, partition, edge_count_updates, d_out_new, d_in_new)
+        #  exit()
     else:
-        M_r_row = edge_count_updates.block_row
-        M_s_row = edge_count_updates.proposal_row
-        M_r_col = edge_count_updates.block_col
-        M_s_col = edge_count_updates.proposal_col
-        M_r_t1 = partition.interblock_edge_count[r, :]
-        M_s_t1 = partition.interblock_edge_count[s, :]
-        M_t2_r = partition.interblock_edge_count[:, r]
-        M_t2_s = partition.interblock_edge_count[:, s]
+        return compute_delta_entropy_dense(r, s, partition, edge_count_updates, d_out_new, d_in_new)
+
+
+def compute_delta_entropy_dense(r, s, partition: Partition, edge_count_updates: EdgeCountUpdates, d_out_new,
+    d_in_new) -> float:
+    """Compute change in entropy under the proposal. Reduced entropy means the proposed block is better than the 
+    current block.
+
+        Parameters
+        ----------
+        r : int
+                    current block assignment for the node under consideration
+        s : int
+                    proposed block assignment for the node under consideration
+        partition : Partition
+                    the current partitioning results
+        edge_count_updates : EdgeCountUpdates
+                    the updates to the current partition's edge count
+        d_out_new : ndarray (int)
+                    the new out degree of each block under proposal
+        d_in_new : ndarray (int)
+                    the new in degree of each block under proposal
+
+        Returns
+        -------
+        delta_entropy : float
+                    entropy under the proposal minus the current entropy
+
+        Notes
+        -----
+        - M^-: current edge count matrix between the blocks
+        - M^+: new edge count matrix under the proposal
+        - d^-_{t, in}: current in degree of block t
+        - d^-_{t, out}: current out degree of block t
+        - d^+_{t, in}: new in degree of block t under the proposal
+        - d^+_{t, out}: new out degree of block t under the proposal
+        
+        The difference in entropy is computed as:
+        
+        \dot{S} = \sum_{t_1, t_2} {\left[ -M_{t_1 t_2}^+ \text{ln}\left(\frac{M_{t_1 t_2}^+}{d_{t_1, out}^+ d_{t_2, in}^+}\right) + M_{t_1 t_2}^- \text{ln}\left(\frac{M_{t_1 t_2}^-}{d_{t_1, out}^- d_{t_2, in}^-}\right)\right]}
+        
+        where the sum runs over all entries $(t_1, t_2)$ in rows and cols $r$ and $s$ of the edge count matrix
+    """
+    M_r_row = edge_count_updates.block_row
+    M_s_row = edge_count_updates.proposal_row
+    M_r_col = edge_count_updates.block_col
+    M_s_col = edge_count_updates.proposal_col
+    M_r_t1 = partition.interblock_edge_count[r, :]
+    M_s_t1 = partition.interblock_edge_count[s, :]
+    M_t2_r = partition.interblock_edge_count[:, r]
+    M_t2_s = partition.interblock_edge_count[:, s]
 
     # remove r and s from the cols to avoid double counting
     idx = list(range(len(d_in_new)))
@@ -456,6 +495,204 @@ def compute_delta_entropy(r, s, partition: Partition, edge_count_updates: EdgeCo
     delta_entropy += np.sum(M_t2_r * np.log(M_t2_r.astype(float) / d_out_r_col / partition.block_degrees_in[r]))
     delta_entropy += np.sum(M_t2_s * np.log(M_t2_s.astype(float) / d_out_s_col / partition.block_degrees_in[s]))
     return delta_entropy
+# End of compute_delta_entropy_dense()
+
+
+def compute_delta_entropy_sparse(r, s, partition: Partition, edge_count_updates: EdgeCountUpdates, d_out_new,
+    d_in_new) -> float:
+    """Compute change in entropy under the proposal. Reduced entropy means the proposed block is better than the
+    current block.
+
+        Parameters
+        ----------
+        r : int
+                    current block assignment for the node under consideration
+        s : int
+                    proposed block assignment for the node under consideration
+        partition : Partition
+                    the current partitioning results
+        edge_count_updates : EdgeCountUpdates
+                    the updates to the current partition's edge count
+        d_out_new : ndarray (int)
+                    the new out degree of each block under proposal
+        d_in_new : ndarray (int)
+                    the new in degree of each block under proposal
+
+        Returns
+        -------
+        delta_entropy : float
+                    entropy under the proposal minus the current entropy
+    """
+    #######
+    # ORIGINAL VERSION
+    #######
+    M_r_row = edge_count_updates.block_row.toarray()
+    M_s_row = edge_count_updates.proposal_row.toarray()
+    M_r_col = edge_count_updates.block_col.toarray()
+    M_s_col = edge_count_updates.proposal_col.toarray()
+    M_r_t1 = partition.interblock_edge_count[r, :].toarray()
+    M_s_t1 = partition.interblock_edge_count[s, :].toarray()
+    M_t2_r = partition.interblock_edge_count[:, r].toarray()
+    M_t2_s = partition.interblock_edge_count[:, s].toarray()
+
+    # remove r and s from the cols to avoid double counting
+    idx = list(range(len(d_in_new)))
+    del idx[max(r, s)]
+    del idx[min(r, s)]
+    M_r_col = M_r_col[idx]
+    M_s_col = M_s_col[idx]
+    M_t2_r = M_t2_r[idx]
+    M_t2_s = M_t2_s[idx]
+    d_out_new_ = d_out_new[idx]
+    d_out_ = partition.block_degrees_out[idx]
+
+    # only keep non-zero entries to avoid unnecessary computation
+    d_in_new_r_row = d_in_new[M_r_row.ravel().nonzero()]
+    d_in_new_s_row = d_in_new[M_s_row.ravel().nonzero()]
+    M_r_row = M_r_row[M_r_row.nonzero()]
+    M_s_row = M_s_row[M_s_row.nonzero()]
+    d_out_new_r_col = d_out_new_[M_r_col.ravel().nonzero()]
+    d_out_new_s_col = d_out_new_[M_s_col.ravel().nonzero()]
+    M_r_col = M_r_col[M_r_col.nonzero()]
+    M_s_col = M_s_col[M_s_col.nonzero()]
+    d_in_r_t1 = partition.block_degrees_in[M_r_t1.ravel().nonzero()]
+    d_in_s_t1 = partition.block_degrees_in[M_s_t1.ravel().nonzero()]
+    M_r_t1= M_r_t1[M_r_t1.nonzero()]
+    M_s_t1 = M_s_t1[M_s_t1.nonzero()]
+    d_out_r_col = d_out_[M_t2_r.ravel().nonzero()]
+    d_out_s_col = d_out_[M_t2_s.ravel().nonzero()]
+    M_t2_r = M_t2_r[M_t2_r.nonzero()]
+    M_t2_s = M_t2_s[M_t2_s.nonzero()]
+
+    # sum over the two changed rows and cols
+    delta_entropy = 0
+    delta_entropy -= np.sum(M_r_row * np.log(M_r_row.astype(float) / d_in_new_r_row / d_out_new[r]))
+    delta_entropy -= np.sum(M_s_row * np.log(M_s_row.astype(float) / d_in_new_s_row / d_out_new[s]))
+    delta_entropy -= np.sum(M_r_col * np.log(M_r_col.astype(float) / d_out_new_r_col / d_in_new[r]))
+    delta_entropy -= np.sum(M_s_col * np.log(M_s_col.astype(float) / d_out_new_s_col / d_in_new[s]))
+    delta_entropy += np.sum(M_r_t1 * np.log(M_r_t1.astype(float) / d_in_r_t1 / partition.block_degrees_out[r]))
+    delta_entropy += np.sum(M_s_t1 * np.log(M_s_t1.astype(float) / d_in_s_t1 / partition.block_degrees_out[s]))
+    delta_entropy += np.sum(M_t2_r * np.log(M_t2_r.astype(float) / d_out_r_col / partition.block_degrees_in[r]))
+    delta_entropy += np.sum(M_t2_s * np.log(M_t2_s.astype(float) / d_out_s_col / partition.block_degrees_in[s]))
+
+    return delta_entropy
+# End of compute_delta_entropy_sparse()
+
+
+def compute_delta_entropy_sparse2(r, s, partition: Partition, edge_count_updates: EdgeCountUpdates, d_out_new,
+    d_in_new) -> float:
+    """Compute change in entropy under the proposal. Reduced entropy means the proposed block is better than the
+    current block.
+
+        Parameters
+        ----------
+        r : int
+                    current block assignment for the node under consideration
+        s : int
+                    proposed block assignment for the node under consideration
+        partition : Partition
+                    the current partitioning results
+        edge_count_updates : EdgeCountUpdates
+                    the updates to the current partition's edge count
+        d_out_new : ndarray (int)
+                    the new out degree of each block under proposal
+        d_in_new : ndarray (int)
+                    the new in degree of each block under proposal
+
+        Returns
+        -------
+        delta_entropy : float
+                    entropy under the proposal minus the current entropy
+    """
+    # #######
+    # # OPTIMIZED VERSION
+    # #######
+    M_r_row = edge_count_updates.block_row.tocoo().data
+    M_s_row = edge_count_updates.proposal_row.tocoo().data
+    M_r_col = edge_count_updates.block_col.tocoo().data
+    M_s_col = edge_count_updates.proposal_col.tocoo().data
+
+    interblock_edge_count = partition.interblock_edge_count.tocsr()
+    # M_r_row = edge_count_updates.block_row.tocoo()
+    # M_s_row = edge_count_updates.proposal_row.tocoo()
+    # M_r_col = edge_count_updates.block_col.tocsr()
+    # M_s_col = edge_count_updates.proposal_col.tocsr()
+    M_r_t1_ = interblock_edge_count[r,:]
+    M_s_t1_ = interblock_edge_count[s,:]
+    M_t2_r_ = interblock_edge_count[:,r]
+    M_t2_s_ = interblock_edge_count[:,s]
+    M_r_t1 = M_r_t1_.data
+    M_s_t1 = M_s_t1_.data
+    M_t2_r = M_t2_r_.data
+    M_t2_s = M_t2_s_.data
+
+    # remove r and s from the cols to avoid double counting
+    M_r_col_mask = ((edge_count_updates.block_col.tocoo().row != r) & (edge_count_updates.block_col.tocoo().row != s))
+    M_s_col_mask = ((edge_count_updates.proposal_col.tocoo().row != r) & (edge_count_updates.proposal_col.tocoo().row != s))
+    
+    # numpy arrays need to be converted to uint8 for indexing
+    M_t2_r_mask = ((M_t2_r_.tocoo().row != r) & (M_t2_r_.tocoo().row != s))
+    M_t2_s_mask = ((M_t2_s_.tocoo().row != r) & (M_t2_s_.tocoo().row != s))
+
+    # idx = list(range(len(d_in_new)))
+    # del idx[max(r, s)]
+    # del idx[min(r, s)]
+    # M_r_col = M_r_col[idx]
+    # M_s_col = M_s_col[idx]
+    # M_t2_r = M_t2_r[idx]
+    # M_t2_s = M_t2_s[idx]
+    # d_out_new_ = d_out_new[idx]
+    # d_out_ = partition.block_degrees_out[idx]
+
+    d_in_new_r_row = d_in_new[edge_count_updates.block_row.tocoo().col]
+    d_in_new_s_row = d_in_new[edge_count_updates.proposal_row.tocoo().col]
+    d_out_new_r = d_out_new[edge_count_updates.block_col.tocoo().row]
+    d_out_new_r_col = d_out_new_r[M_r_col_mask]
+    d_out_new_s = d_out_new[edge_count_updates.proposal_col.tocoo().row]
+    d_out_new_s_col = d_out_new_s[M_s_col_mask]
+    M_r_col = M_r_col[M_r_col_mask]
+    M_s_col = M_s_col[M_s_col_mask]
+    d_in_r_t1 = partition.block_degrees_in[M_r_t1_.tocoo().col]  # M_r_t1.nonzero()]
+    d_in_s_t1 = partition.block_degrees_in[M_s_t1_.tocoo().col]  # M_s_t1.nonzero()]
+    d_out_r = partition.block_degrees_out[M_t2_r_.tocoo().row]
+    d_out_r_col = d_out_r[M_t2_r_mask]  # d_out_[M_t2_r.nonzero()]
+    d_out_s = partition.block_degrees_out[M_t2_s_.tocoo().row]
+    d_out_s_col = d_out_s[M_t2_s_mask]  # d_out_[M_t2_s.nonzero()]
+    M_t2_r = M_t2_r[M_t2_r_mask]  # .nonzero()]
+    M_t2_s = M_t2_s[M_t2_s_mask]  # .nonzero()]
+
+    # # only keep non-zero entries to avoid unnecessary computation
+    # d_in_new_r_row = d_in_new[M_r_row.col]
+    # d_in_new_s_row = d_in_new[M_s_row.col]
+    # M_r_row = M_r_row.data
+    # M_s_row = M_s_row.data
+    # d_out_new_r_col = d_out_new_[M_r_col.tocoo().row]
+    # d_out_new_s_col = d_out_new_[M_s_col.tocoo().row]
+    # M_r_col = M_r_col.data
+    # M_s_col = M_s_col.data
+    # d_in_r_t1 = partition.block_degrees_in[M_r_t1.col]
+    # d_in_s_t1 = partition.block_degrees_in[M_s_t1.col]
+    # M_r_t1 = M_r_t1.data  # [M_r_t1.nonzero()]
+    # M_s_t1 = M_s_t1.data  # [M_s_t1.nonzero()]
+    # d_out_r_col = d_out_[M_t2_r.tocoo().row]
+    # d_out_s_col = d_out_[M_t2_s.tocoo().row]
+    # M_t2_r = M_t2_r.data  # [M_t2_r.nonzero()]
+    # M_t2_s = M_t2_s.data  # [M_t2_s.nonzero()]
+
+    delta_entropy = 0
+    delta_entropy -= np.sum(M_r_row * np.log(M_r_row.astype(float) / d_in_new_r_row / d_out_new[r]))
+    delta_entropy -= np.sum(M_s_row * np.log(M_s_row.astype(float) / d_in_new_s_row / d_out_new[s]))
+    delta_entropy -= np.sum(M_r_col * np.log(M_r_col.astype(float) / d_out_new_r_col / d_in_new[r]))
+    delta_entropy -= np.sum(M_s_col * np.log(M_s_col.astype(float) / d_out_new_s_col / d_in_new[s]))
+    delta_entropy += np.sum(M_r_t1 * np.log(M_r_t1.astype(float) / d_in_r_t1 / partition.block_degrees_out[r]))
+    delta_entropy += np.sum(M_s_t1 * np.log(M_s_t1.astype(float) / d_in_s_t1 / partition.block_degrees_out[s]))
+    delta_entropy += np.sum(M_t2_r * np.log(M_t2_r.astype(float) / d_out_r_col / partition.block_degrees_in[r]))
+    delta_entropy += np.sum(M_t2_s * np.log(M_t2_s.astype(float) / d_out_s_col / partition.block_degrees_in[s]))
+
+    # print(delta_entropy)
+
+    return delta_entropy
+# End of compute_delta_entropy_sparse2()
 
 
 def carry_out_best_merges(delta_entropy_for_each_block, best_merge_for_each_block, partition: Partition) -> Partition:
