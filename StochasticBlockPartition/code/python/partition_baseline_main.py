@@ -12,7 +12,7 @@ from partition_baseline_support import prepare_for_partition_on_next_num_blocks
 
 from partition import Partition, PartitionTriplet
 from block_merge import merge_blocks
-from node_reassignment import reassign_nodes, propagate_membership, fine_tune_membership
+from node_reassignment import reassign_nodes, reassign_nodes_batched, propagate_membership, fine_tune_membership
 from graph import Graph
 from evaluate import evaluate_partition, evaluate_subgraph_partition
 from evaluation import Evaluation
@@ -73,6 +73,8 @@ def parse_arguments():
                         help="""Sampling algorithm to use. Default = none""")
     parser.add_argument("--sample_iterations", type=int, default=1,
                         help="The number of sampling iterations to perform. Default = 1")
+    parser.add_argument("-a", "--num_batches", type=int, default=1,
+                        help="The number of batches to use. Default = 1")
     parser.add_argument("--degrees", action="store_true", help="Save vertex degrees and exit.")
     args = parser.parse_args()
     return args
@@ -113,7 +115,10 @@ def stochastic_block_partition(graph: Graph, args: argparse.Namespace) -> Tuple[
         if args.verbose:
             print("Beginning nodal updates")
 
-        partition = reassign_nodes(partition, graph, partition_triplet, evaluation, args)
+        if args.num_batches > 1:
+            partition = reassign_nodes_batched(partition, graph, partition_triplet, evaluation, args)
+        else:
+            partition = reassign_nodes(partition, graph, partition_triplet, evaluation, args)
 
         if visualize_graph:
             graph_object = plot_graph_with_partition(graph.out_neighbors, partition.block_assignment, graph_object)

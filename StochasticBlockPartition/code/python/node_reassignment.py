@@ -108,6 +108,95 @@ def reassign_nodes(partition: Partition, graph: Graph, partition_triplet: Partit
 # End of reassign_nodes()
 
 
+def reassign_nodes_batched(partition: Partition, graph: Graph, partition_triplet: PartitionTriplet,
+    evaluation: Evaluation, args: Namespace) -> Partition:
+    """Reassigns nodes to different blocks based on Bayesian statistics.
+
+        Parameters
+        ---------
+        partition : Partition
+                the current partitioning results
+        graph : Graph
+                the loaded Graph object
+        partition_triplet : PartitionTriplet
+                the triplet of partitions with the lowest overall entropy scores so far
+        evaluation : Evaluation
+                stores the evaluation metrics
+        args : Namespace
+                the command-line arguments
+
+        Returns
+        -------
+        partition : Partition
+                the updated partitioning results
+    """
+    # nodal partition updates parameters
+    # delta_entropy_threshold1 = 5e-4  # stop iterating when the change in entropy falls below this fraction of the overall entropy
+                                    # lowering this threshold results in more nodal update iterations and likely better performance, but longer runtime
+    # delta_entropy_threshold2 = 1e-4  # threshold after the golden ratio bracket is established (typically lower to fine-tune to partition)
+    delta_entropy_moving_avg_window = 3  # width of the moving average window for the delta entropy convergence criterion
+
+    mcmc_timings = evaluation.add_mcmc_timings()
+
+    mcmc_timings.t_initialization()
+    itr_delta_entropy = np.zeros(args.iterations)
+    delta_entropy_threshold1, delta_entropy_threshold2 = get_thresholds(evaluation.num_iterations, args)
+    mcmc_timings.t_initialization()
+
+    # compute the global entropy for MCMC convergence criterion
+    mcmc_timings.t_compute_initial_entropy()
+    partition.overall_entropy = compute_overall_entropy(partition, graph.num_nodes, graph.num_edges, args.sparse)
+    mcmc_timings.t_compute_initial_entropy()
+
+    for itr in range(args.iterations):
+        evaluation.num_nodal_update_iterations += 1
+        num_nodal_moves = 0
+        itr_delta_entropy[itr] = 0
+
+        batch_size = int(graph.num_nodes / args.num_batches)
+        for batch in range(args.num_batches):
+            print("Processing batch {}".format(batch))
+            batch_start = batch * batch_size
+            for vertex in range(batch_start, min(batch_start + batch_size, graph.num_nodes)):
+                delta_entropy, did_move = propose_new_assignment(vertex, partition, graph, args, mcmc_timings)
+                if did_move:
+                    evaluation.num_nodal_updates += 1
+                    num_nodal_moves += 1
+                    itr_delta_entropy[itr] += delta_entropy
+
+        # End of iteration_over_nodes
+        if args.verbose:
+            print("Itr: {}, number of nodal moves: {}, delta S: {:0.5f}".format(
+                itr, num_nodal_moves, itr_delta_entropy[itr] / float(partition.overall_entropy)))
+
+        # exit MCMC if the recent change in entropy falls below a small fraction of the overall entropy
+        mcmc_timings.t_early_stopping()
+        if itr >= (delta_entropy_moving_avg_window - 1):
+            if not (np.all(np.isfinite(partition_triplet.overall_entropy))):  # golden ratio bracket not yet established
+                if (-np.mean(itr_delta_entropy[(itr - delta_entropy_moving_avg_window + 1):itr]) < (
+                    delta_entropy_threshold1 * partition.overall_entropy)):
+                    mcmc_timings.t_early_stopping()
+                    break
+            else:  # golden ratio bracket is established. Fine-tuning partition.
+                if (-np.mean(itr_delta_entropy[(itr - delta_entropy_moving_avg_window + 1):itr]) < (
+                    delta_entropy_threshold2 * partition.overall_entropy)):
+                    mcmc_timings.t_early_stopping()
+                    break
+        mcmc_timings.t_early_stopping()
+
+    # compute the global entropy for determining the optimal number of blocks
+    mcmc_timings.t_compute_final_entropy()
+    partition.overall_entropy = compute_overall_entropy(partition, graph.num_nodes, graph.num_edges, args.sparse)
+    mcmc_timings.t_compute_final_entropy()
+
+    if args.verbose:
+        print("Total number of nodal moves: {}, overall_entropy: {:0.2f}".format(
+            evaluation.num_nodal_updates, partition.overall_entropy))
+
+    return partition
+# End of reassign_nodes_batched()
+
+
 def propose_new_assignment(current_node: int, partition: Partition, graph: Graph, 
     args: Namespace, mcmc_timings: MCMCTimings) -> Tuple[float, bool]:
     """Proposes a block reassignment to for the given node.
