@@ -1,7 +1,0 @@
-scipy==1.2.1
-sortedcontainers==2.1.0
-munkres==1.1.2
-numpy==1.15.4
-pandas==0.24.1
-graph_tool==2.11
-typing==3.7.4
